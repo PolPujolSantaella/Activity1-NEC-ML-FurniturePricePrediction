@@ -14,7 +14,7 @@ class NeuralNet:
     self.d_theta_prev = [] # Previous changes of thresholds (momentum)
     
     # Initialize to 0 (Activation, Fields, Thresholds, Gradient) for each unit 
-    # Vectors of 1 x n[i]
+    # Vectors of n[i] x 1
     for lay in range(self.L):
       self.xi.append(np.zeros(layers[lay]))
       self.h.append(np.zeros(layers[lay]))
@@ -26,10 +26,10 @@ class NeuralNet:
     self.w = [] # Weights of each unit
     self.w.append(np.zeros((1, 1))) # Initialize to 0 w[0] (relation layer 0 -> 1)
 
-    self.d_w = []
+    self.d_w = [] # Changes of weights
     self.d_w.append(np.zeros((1,1))) # Initialize to 0 d_w[0] (relation layer 0 -> 1)
 
-    self.d_w_prev = []
+    self.d_w_prev = [] # Previous changes of weigths
     self.d_w_prev.append(np.zeros((1,1))) # Initialize to 0 d_w[0] (relation layer 0 -> 1)
 
     # Initialize (Weigths, Changes of weigths, Previous changes of weigths) each relation between previous layer units to next layer units
@@ -47,12 +47,21 @@ class NeuralNet:
       "tanh": np.tanh
     }
 
+    activation_derivatives_functions = {
+      "sigmoid": lambda x: activation_functions["sigmoid"](x) * (1 - activation_functions["sigmoid"](x)),
+      "relu": lambda x: (x > 0).astype(float),
+      "linear": lambda x: np.ones_like(x),
+      "tanh": lambda x: 1 - np.tanh(x)**2
+    }
+
     # I fact is not in activation_functions raise Error
     if fact not in activation_functions:
       raise ValueError(f"Unknown activation fucntion '{fact}'. Must be one of: {list(activation_functions.keys())}")
     
     self.fact_name = fact 
     self.fact = activation_functions[fact]
+
+    self.fact_der = activation_derivatives_functions[fact]
 
     #Other input parameters
     self.epochs = epochs
@@ -104,12 +113,10 @@ class NeuralNet:
         self._forward(x_pattern)
 
         # STEP 7: Back-Propagation
-        self._backPropagation(x_pattern)
+        self._backPropagation(y_pattern)
 
         # STEP 8: Update-Weights
-
-
-
+        self._update(x_pattern)
 
   def _forward(self, x_pattern):
 
@@ -125,10 +132,34 @@ class NeuralNet:
     return self.xi[self.L - 1].copy()
   
   
+  def _backPropagation(self, y_pattern):
+    # Error (prediction - real)
+    error = self.xi[self.L - 1] - y_pattern
+
+    # Gradient = error * fact'(h[L - 1]])
+    self.delta[self.L - 1] = error * self.fact_der(self.h[self.L - 1])
+
+    # Back Propagate to the rest of the network
+    for l in range (self.L - 1, 1, -1):
+      # Previous Gradient = fact'(h[L - 1]) * SUM(self.delta[l] * self.weigths)
+      # TRANSPOSE WEIGHTS because delta is (n[l] x 1) and weigths (n[l] x n[l + 1])
+      delta_prev = self.fact_der(self.h[l - 1]) * np.dot(self.w[l].T, self.delta[l])
+      self.delta[l - 1] = delta_prev
+
+    # Calculate gradient for weights and thresholds
+    for l in range(1, self.L):
+      # Gradient Weights = self.xi[l - 1] * delta[l]
+      self.d_w[l] = np.outer(self.delta[l], self.xi[l - 1])
+
+      # Gradient Thresholds = delta[l]
+      self.d_theta = self.delta[l]
   
-  
-  def _backPropagation(self, x_pattern):
+
+  def _update(self, x_pattern):
     pass
+
+    
+
 
 
 
