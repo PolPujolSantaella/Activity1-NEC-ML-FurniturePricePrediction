@@ -69,6 +69,83 @@ class NeuralNet:
     self.momentum = momentum
     self.validation_split = validation_split
 
+    self.train_loss_history = []
+    self.val_loss_history = []
+
+
+  def _forward(self, x_pattern):
+
+    self.xi[0] = x_pattern # The first input layer contains the random pattern
+    
+    # For each layer
+    for l in range(1, self.L):
+      self.h[l] = np.dot(self.w[l], self.xi[l-1]) - self.theta[l]
+      
+      # Compute Activation (output of the unit)
+      self.xi[l] = self.fact(self.h[l])
+
+    return self.xi[self.L - 1]
+  
+  
+  def _backPropagation(self, y_pattern):
+    # Error (prediction - real)
+    error = self.xi[self.L - 1] - y_pattern
+
+    # Gradient = error * fact'(h[L - 1]])
+    self.delta[self.L - 1] = self.fact_der(self.h[self.L - 1]) * error
+
+    # Back Propagate to the rest of the network
+    for l in range(self.L - 1, 1, -1):
+      # Previous Gradient = fact'(h[l - 1]) * SUM(self.delta[l] * self.weigths)
+      # TRANSPOSE WEIGHTS because delta is (n[l] x 1) and weigths (n[l] x n[l + 1])
+      delta_sum = np.dot(self.w[l].T, self.delta[l])
+      self.delta[l - 1] = self.fact_der(self.h[l - 1]) * delta_sum
+
+  def _update(self):
+    # Change Weights & Thresholds with descent gradient
+    # New weight = - learning_rate * d_w + momentum * previous change d_w_prev
+    for l in range(1, self.L):
+      dw_grad = np.outer(self.delta[l], self.xi[l - 1])
+      self.d_w[l] = -self.learning_rate * dw_grad + self.momentum * self.d_w_prev[l]
+
+      # Update
+      self.w[l] += self.d_w[l]
+
+      # Thresholds
+      # New threshold = learning_rate * d_t + momentum * previous change d_t_prev
+      self.d_theta[l] = self.learning_rate * self.delta[l] + self.momentum * self.d_theta_prev[l]
+      #Update
+      self.theta[l] += self.d_theta[l]
+
+      self.d_w_prev[l] = self.d_w[l].copy()
+      self.d_theta_prev[l] = self.d_theta[l].copy()
+
+  def _score(self, X, y):
+    X = X.to_numpy() if not isinstance(X, np.ndarray) else X
+    y = y.to_numpy() if not isinstance(y, np.ndarray) else y
+
+    num_samples = X.shape[0]
+    total_squared_error = 0.0
+
+    # For every pattern
+    for i in range(num_samples):
+      x_pattern = X[i]
+      y_pattern = y[i]
+
+      # Feed-Forward
+      prediction = self._forward(x_pattern)
+
+      # Quadratic Error
+      squared_error = np.sum((prediction - y_pattern)**2)
+      total_squared_error += squared_error
+
+    # Mean Quadratic Error
+    mse = total_squared_error / num_samples
+    return mse
+  
+  def loss_epochs(self):
+    return np.array(self.train_loss_history), np.array(self.val_loss_history)
+  
   def fit(self, X, y):
     """
     Train the neural network using backpropagation
@@ -92,20 +169,23 @@ class NeuralNet:
     X_train = X[val_size:]
     y_train = y[val_size:]
 
+    num_train_patterns = X_train.shape[0]
+
     # STEP 2: Initialize Weigths & Thresholds randomly
     for lay in range(1, self.L):
       # Random values from -1 to 1
-      self.w[lay] = np.random.uniform(-1, 1, (self.n[lay], self.n[lay - 1]))
+      self.w[lay] = np.random.uniform(-1, 1, (self.n[lay], self.n[lay-1]))
       self.theta[lay] = np.random.uniform(-1, 1, self.n[lay])
 
 
     # STEP 3: For each epoch
     for epoch in range(self.epochs):
+      epoch_errors = []
       # STEP 4: For each patter in trainning
-      for _ in range(X_train.shape[0]):
+      for _ in range(num_train_patterns):
 
         # STEP 5: Choose one random
-        random_pattern = np.random.randint(0, X_train.shape[0])
+        random_pattern = np.random.randint(0, num_train_patterns)
         x_pattern = X_train[random_pattern]
         y_pattern = y_train[random_pattern]
 
@@ -118,75 +198,32 @@ class NeuralNet:
         # STEP 8: Update-Weights
         self._update()
 
-      if epoch % 50 == 0:
-        pred = self._forward(x_pattern)
-        loss = np.mean((pred - y_pattern)**2)
-        print(f"Epoch {epoch}, loss = {loss}")
+      # STEP 9: Feed-Forward Trainning & Quadratic Error
+      mse_train = self._score(X_train, y_train)
 
-  def _forward(self, x_pattern):
+      # STEP 10: Feed-Forward Validation & Quadratic Error
+      mse_val = self._score(X_val, y_val)
 
-    self.xi[0] = x_pattern # The first input layer contains the random pattern
-    
-    # For each layer
-    for l in range(1, self.L):
-      self.h[l] = np.dot(self.w[l], self.xi[l-1]) - self.theta[l]
-      
-      # Compute Activation (output of the unit)
-      self.xi[l] = self.fact(self.h[l])
+      # Add to loss history
+      self.train_loss_history.append(mse_train)
+      self.val_loss_history.append(mse_val)
 
-    return self.xi[self.L - 1].copy()
-  
-  
-  def _backPropagation(self, y_pattern):
-    # Error (prediction - real)
-    error = y_pattern - self.xi[self.L - 1]
+      if epoch % 10 == 0 or epoch == self.epochs - 1:
+        print(f"Epoch {epoch + 1}/{self.epochs}, Train MSE: {mse_train:.6f}, Validation MSE: {mse_val:.6f}")
 
-    # Gradient = error * fact'(h[L - 1]])
-    self.delta[self.L - 1] = error * self.fact_der(self.h[self.L - 1])
+  def predict(self, X):
+    X = X.to_numpy() if not isinstance(X, np.ndarray) else X
 
-    # Back Propagate to the rest of the network
-    for l in range (self.L - 1, 1, -1):
-      # Previous Gradient = fact'(h[L - 1]) * SUM(self.delta[l] * self.weigths)
-      # TRANSPOSE WEIGHTS because delta is (n[l] x 1) and weigths (n[l] x n[l + 1])
-      delta_prev = self.fact_der(self.h[l - 1]) * np.dot(self.w[l].T, self.delta[l])
-      self.delta[l - 1] = delta_prev
-
-    # Calculate gradient for weights and thresholds
-    for l in range(1, self.L):
-      # Gradient Weights = self.xi[l - 1] * delta[l]
-      self.d_w[l] = np.outer(self.delta[l], self.xi[l - 1])
-
-      # Gradient Thresholds = delta[l]
-      self.d_theta[l] = self.delta[l]
-  
-
-  def _update(self):
-    # Change Weights & Thresholds with descent gradient
-    # New weight = - learning_rate * d_w + momentum * previous change d_w_prev
-    for l in range(1, self.L):
-      new_weight = - self.learning_rate * self.d_w[l] + self.momentum * self.d_w_prev[l]
-
-      # Update
-      self.w[l] += new_weight
-
-      #Store Change
-      self.d_w_prev[l] = new_weight
-
-      # Thresholds
-      # New threshold = learning_rate * d_t + momentum * previous change d_t_prev
-      new_threshold = self.learning_rate * self.d_theta[l] + self.momentum * self.d_theta_prev[l]
-
-      #Update
-      self.theta[l] += new_threshold
-
-      #Store
-      self.d_theta_prev[l] = new_threshold
-
-
+    predictions = []
+    for x_pattern in X:
+      # Feed Forward to obtain prediction
+      prediction = self._forward(x_pattern)
+      predictions.append(prediction)
+    return np.array(predictions)
 
 if __name__ == "__main__":
   # MAIN
-  layers = [16, 32, 16, 1]
+  layers = [18, 32, 16, 1]
   epochs = 100
   learning_rate = 0.01
   momentum = 0.9
