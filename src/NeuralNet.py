@@ -47,6 +47,7 @@ class NeuralNet:
       "tanh": np.tanh
     }
 
+    # Derivates of activation functions
     activation_derivatives_functions = {
       "sigmoid": lambda x: activation_functions["sigmoid"](x) * (1 - activation_functions["sigmoid"](x)),
       "relu": lambda x: (x > 0).astype(float),
@@ -58,9 +59,11 @@ class NeuralNet:
     if fact not in activation_functions:
       raise ValueError(f"Unknown activation fucntion '{fact}'. Must be one of: {list(activation_functions.keys())}")
     
+    # Activation function
     self.fact_name = fact 
     self.fact = activation_functions[fact]
 
+    # Derivative of activation function
     self.fact_der = activation_derivatives_functions[fact]
 
     #Other input parameters
@@ -69,6 +72,7 @@ class NeuralNet:
     self.momentum = momentum
     self.validation_split = validation_split
 
+    # History of the error in trainning & validation
     self.train_loss_history = []
     self.val_loss_history = []
 
@@ -77,17 +81,23 @@ class NeuralNet:
 
     self.xi[0] = x_pattern # The first input layer contains the random pattern
     
-    # For each layer
-    for l in range(1, self.L):
+    # For each layer 
+    for l in range(1, self.L - 1):
       self.h[l] = np.dot(self.w[l], self.xi[l-1]) - self.theta[l]
       
       # Compute Activation (output of the unit)
       self.xi[l] = self.fact(self.h[l])
 
-    return self.xi[self.L - 1]
+    # The output layer must be Linear function
+    l_out = self.L - 1
+    self.h[l_out] = np.dot(self.w[l_out], self.xi[l_out - 1]) - self.theta[l_out]
+    self.xi[l_out] = self.h[l_out]
+
+    return self.xi[l_out]
   
   
   def _backPropagation(self, y_pattern):
+
     # Error (prediction - real)
     error = self.xi[self.L - 1] - y_pattern
 
@@ -103,7 +113,7 @@ class NeuralNet:
 
   def _update(self):
     # Change Weights & Thresholds with descent gradient
-    # New weight = - learning_rate * d_w + momentum * previous change d_w_prev
+    # New weight = - learning_rate * delta[l] * xi[l-1] + momentum * previous change d_w_prev[l]
     for l in range(1, self.L):
       dw_grad = np.outer(self.delta[l], self.xi[l - 1])
       self.d_w[l] = -self.learning_rate * dw_grad + self.momentum * self.d_w_prev[l]
@@ -112,11 +122,13 @@ class NeuralNet:
       self.w[l] += self.d_w[l]
 
       # Thresholds
-      # New threshold = learning_rate * d_t + momentum * previous change d_t_prev
+      # New threshold = learning_rate * delta[l] + momentum * previous change d_t_prev
       self.d_theta[l] = self.learning_rate * self.delta[l] + self.momentum * self.d_theta_prev[l]
+
       #Update
       self.theta[l] += self.d_theta[l]
 
+      # Store previous changes of weights & thresholds
       self.d_w_prev[l] = self.d_w[l].copy()
       self.d_theta_prev[l] = self.d_theta[l].copy()
 
@@ -173,9 +185,15 @@ class NeuralNet:
 
     # STEP 2: Initialize Weigths & Thresholds randomly
     for lay in range(1, self.L):
-      # Random values from -1 to 1
-      self.w[lay] = np.random.uniform(-1, 1, (self.n[lay], self.n[lay-1]))
-      self.theta[lay] = np.random.uniform(-1, 1, self.n[lay])
+      if self.fact_name == "relu":
+        # He Initialization for Relu
+        std_dev = np.sqrt(2.0/self.n[lay - 1])
+        self.w[lay] = np.random.normal(0, std_dev, (self.n[lay], self.n[lay - 1]))
+        
+      else:
+        # Random values from -1 to 1
+        self.w[lay] = np.random.uniform(-1, 1, (self.n[lay], self.n[lay-1]))
+        self.theta[lay] = np.random.uniform(-1, 1, self.n[lay])
 
 
     # STEP 3: For each epoch
@@ -220,6 +238,9 @@ class NeuralNet:
       prediction = self._forward(x_pattern)
       predictions.append(prediction)
     return np.array(predictions)
+
+
+
 
 if __name__ == "__main__":
   # MAIN
